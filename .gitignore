@@ -1,0 +1,15 @@
+# IDE / editor
+.vscode/
+.idea/
+*.iml
+
+# Virtual environments
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+.venv/
+
+# macOS
+.DS_Store
