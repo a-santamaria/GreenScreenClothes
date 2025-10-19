@@ -18,21 +18,43 @@ def main():
 
     # Noise params (using pip 'noise' library pnoise2)
     seed = 42
-    octaves = 8          # single octave (can raise if desired)
+    octaves = 5          # single octave (can raise if desired)
     persistence = 0.5    # kept for potential future multi-octave use
     lacunarity = 2.0
-    base_scale = 0.5          # spatial frequency
-    time_scale = 0.3         # how fast field evolves (0 => static field)
+    base_scale = 0.8          # spatial frequency
+    time_scale = 0.2          # how fast field evolves (0 => static field)
     brightness_max = 100        # requested display max (logical scale 0..100)
 
     show_values = False         # overlay numeric brightness values
-    use_palette = True          # toggle between earth palette and grayscale
+    palette_mode = 1            # 0=grayscale, 1=ember, 2=earth
+
+    palette_definitions = {
+        "ember": [
+            (27, 1, 103),    # #67011b (crimson plum) (vinotinto)
+            (9, 42, 199),    # #c72a09 (fiery orange) (rojo anaranjado)
+            (103, 46, 1),    # #012e67 (deep navy) (azul)
+            (5, 166, 225),   # #e1a605 (amber gold) (amarillo)
+            (69, 41, 89),    # #592945 (dusky violet) (violta)
+            (39, 38, 37),    # #252627 (charcoal) (negro)
+        ],
+        "earth": [
+            (35, 54, 82),    # dark soil (deep brown)
+            (57, 96, 142),   # warm brown
+            (68, 120, 160),  # olive/earth green
+            (90, 153, 180),  # sage
+            (110, 189, 215), # light sand/sky
+            # (110, 189, 215)  # light sand/sky 2
+        ]
+    }
+    palette_cycle = ["grayscale", "ember", "earth"]
+    use_points = False
+    use_segments = True
 
     cv2.namedWindow("Perlin Rect Field", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Perlin Rect Field", width, height)
 
     print("Perlin Rectangle Field")
-    print("ESC/q: quit | v: toggle numeric values | c: toggle color palette | +/-: change scale | h/l: adjust time scale | p: pause | s: screenshot | r: reseed")
+    print("ESC/q: quit | v: toggle numeric values | c: cycle color modes | x: toggle points | u: toggle segment bands | +/-: change scale | h/l: adjust time scale | p: pause | s: screenshot | r: reseed")
 
     # Field is static (no temporal evolution), so we don't track time.
     paused = False
@@ -75,37 +97,59 @@ def main():
                 # Map to 0..brightness_max
                 brightness = int(n01 * brightness_max)
 
-                if use_palette:
-                    # Earth-tone palette (BGR) for OpenCV: deep brown -> sand -> olive -> sage -> cream
-                    palette = [
-                        (35, 54, 82),    # dark soil (deep brown)
-                        (57, 96, 142),   # warm brown
-                        (68, 120, 160),  # olive/earth green
-                        (90, 153, 180),  # sage
-                        (110, 189, 215)  # light sand/sky
-                    ]
-                    # 15 segments across brightness range, cycling colors 1..5 three times
-                    segments = 15
-                    segment_size = max(1, brightness_max // segments)
-                    segment_idx = min(segments - 1, brightness // segment_size)
-                    bin_idx = segment_idx % 5  # cycle 0..4
-                    color = palette[bin_idx]
-                else:
+                bin_idx = 0
+                if palette_mode == 0:
                     # Convert to 0..255 for grayscale display (scaled by brightness_max/100)
                     display_val = int(brightness * 255 / brightness_max)
                     color = (display_val, display_val, display_val)
+                else:
+                    palette_key = palette_cycle[palette_mode]
+                    palette = palette_definitions[palette_key]
+                    normalized = brightness / max(1, brightness_max)
+
+                    if use_segments:
+                        segments = 15
+                        segment_idx = min(segments - 1, int(normalized * segments))
+                        bin_idx = segment_idx % len(palette)
+                    else:
+                        bin_idx = min(len(palette) - 1, int(normalized * len(palette)))
+                    
+                    # if len(palette) == 5:
+                    #     segments = 15
+                    #     segment_idx = min(segments - 1, int(normalized * segments))
+                    #     bin_idx = segment_idx % len(palette)
+                    # elif len(palette) == 6:
+                    #     segments = [25, 20, 15, 15, 15, 10]  # total 100
+                    #     total_segments = sum(segments)
+                    #     segment_idx = min(total_segments - 1, int(normalized * total_segments))
+                    #     cumulative = 0
+                    #     bin_idx = len(palette) - 1
+                    #     for i, seg_count in enumerate(segments):
+                    #         cumulative += seg_count
+                    #         if segment_idx < cumulative:
+                    #             bin_idx = i
+                    #             break
+                    # else:
+                        # bin_idx = min(len(palette) - 1, int(normalized * len(palette)))
+
+                    color = palette[bin_idx]
 
                 x0 = c * cell_size
                 y0 = r * cell_size
-                cv2.rectangle(canvas, (x0, y0), (x0 + cell_size - 1, y0 + cell_size - 1), color, -1)
+                if use_points:
+                    center = (int(x0 + cell_size * 0.5), int(y0 + cell_size * 0.5))
+                    radius = max(1, cell_size // 2)
+                    cv2.circle(canvas, center, radius, color, 3, cv2.LINE_AA)
+                else:
+                    cv2.rectangle(canvas, (x0, y0), (x0 + cell_size - 1, y0 + cell_size - 1), color, -1)
 
-                if show_values and cell_size >= 14:  # only draw text if enough room
+                if show_values and cell_size >= 14 and not use_points:  # text only when rectangles large enough
                     txt = str(brightness)
                     text_color = (0, 0, 0)
-                    if use_palette:
-                        text_color = (0, 0, 0) if bin_idx < 3 else (70, 70, 70)
-                    else:
+                    if palette_mode == 0:
                         text_color = (0, 0, 255) if brightness > brightness_max * 0.7 else (0, 0, 0)
+                    else:
+                        text_color = (0, 0, 0) if bin_idx < len(palette) // 2 else (70, 70, 70)
                     cv2.putText(canvas, txt, (x0 + 2, y0 + cell_size - 4), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.35, text_color, 1, cv2.LINE_AA)
 
@@ -118,9 +162,20 @@ def main():
             show_values = not show_values
             print(f"Values overlay: {'ON' if show_values else 'OFF'}")
         elif key == ord('c'):
-            use_palette = not use_palette
-            mode = "Earth palette" if use_palette else "Grayscale"
-            print(f"Color mode: {mode}")
+            palette_mode = (palette_mode + 1) % len(palette_cycle)
+            mode_label = palette_cycle[palette_mode]
+            readable = {
+                "grayscale": "Grayscale",
+                "earth": "Earth palette",
+                "ember": "Ember palette"
+            }
+            print(f"Color mode: {readable.get(mode_label, mode_label.title())}")
+        elif key == ord('x'):
+            use_points = not use_points
+            print(f"Draw mode: {'Points' if use_points else 'Rectangles'}")
+        elif key == ord('u'):
+            use_segments = not use_segments
+            print(f"Segment bands: {'ON' if use_segments else 'OFF'}")
         elif key == ord('+') or key == ord('='):
             base_scale *= 1.15
             print(f"Scale increased: {base_scale:.4f}")
