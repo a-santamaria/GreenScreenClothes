@@ -80,9 +80,19 @@ class FlowingBrushStrokes:
                 
                 # Calculate the current curve offset
                 curve_offset = math.sin(line['current_length'] * line['curve_frequency']) * line['curve_amplitude']
-                current_angle = line['start_angle'] + curve_offset * 0.01
+                current_angle = line['start_angle'] + curve_offset * 0.08
+
+                # Create a smooth directional curve instead of oscillating
+                # Use a gradual bend that accumulates over distance for natural flow
+                # progress = line['current_length'] / line['max_length']
                 
-                # Calculate new point position
+                # # Smooth curve that bends gradually in one direction
+                # curve_factor = progress * line['curve_frequency'] * 50  # Accumulated curve over distance
+                # curve_offset = curve_factor * line['curve_amplitude'] * 0.05  # Much smaller multiplier for subtle curves
+                
+                # current_angle = line['start_angle'] + curve_offset
+                
+                # # Calculate new point position
                 x = self.center_x + math.cos(current_angle) * line['current_length']
                 y = self.center_y + math.sin(current_angle) * line['current_length']
                 
@@ -125,10 +135,12 @@ class FlowingBrushStrokes:
     
     def draw(self, canvas):
         """Draw the continuous flowing brush strokes on the canvas"""
+        
         # Create a subtle fade effect for trails
-        # overlay = canvas.copy()
-        # cv2.rectangle(overlay, (0, 0), (self.width, self.height), (0, 0, 0), -1)
-        # cv2.addWeighted(canvas, 0.95, overlay, 0.05, 0, canvas)
+        overlay = canvas.copy()
+        cv2.rectangle(overlay, (0, 0), (self.width, self.height), (0, 0, 0), -1)
+        # cv2.rectangle(overlay, (0, 0), (self.width, self.height), (255, 255, 255), -1)
+        cv2.addWeighted(canvas, 0.95, overlay, 0.05, 0, canvas)
         
         for line in self.flow_lines:
             points = line['points']
@@ -152,15 +164,15 @@ class FlowingBrushStrokes:
                 cv2.line(canvas, points[i], points[i + 1], faded_color, thickness)
                 
                 # Add subtle glow for thicker lines
-                # if thickness > 2:
-                #     glow_color = tuple(int(c * alpha * 0.6) for c in color)
-                #     cv2.line(canvas, points[i], points[i + 1], glow_color, thickness + 2)
+                if thickness > 2:
+                    glow_color = tuple(int(c * alpha * 0.6) for c in color)
+                    cv2.line(canvas, points[i], points[i + 1], glow_color, thickness + 2)
             
             # Draw the "head" of the growing line with extra brightness
             if line['growing'] and len(points) > 0:
                 head_point = points[-1]
                 bright_color = tuple(min(255, int(c * 1.3)) for c in color)
-                # cv2.circle(canvas, head_point, thickness , bright_color, -1)
+                cv2.circle(canvas, head_point, thickness , bright_color, -1)
                 
                 # Add a small glow around the head
                 glow_color = tuple(int(c * 0.8) for c in color)
@@ -178,8 +190,11 @@ def main():
     cv2.namedWindow("Generative Flow Art", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Generative Flow Art", width, height)
     
-    # Main canvas
+    # Main canvas - black background
     canvas = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Main canvas - white background
+    # canvas = np.full((height, width, 3), 255, dtype=np.uint8)
     
     print("Generative Flow Art Test")
     print("Press ESC to exit")
