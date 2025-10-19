@@ -49,12 +49,13 @@ def main():
     palette_cycle = ["grayscale", "ember", "earth"]
     use_points = False
     use_segments = True
+    apply_blur = False
 
     cv2.namedWindow("Perlin Rect Field", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Perlin Rect Field", width, height)
 
     print("Perlin Rectangle Field")
-    print("ESC/q: quit | v: toggle numeric values | c: cycle color modes | x: toggle points | u: toggle segment bands | +/-: change scale | h/l: adjust time scale | p: pause | s: screenshot | r: reseed")
+    print("ESC/q: quit | v: toggle numeric values | c: cycle color modes | x: toggle points | u: toggle segment bands | b: toggle blur | +/-: change scale | h/l: adjust time scale | p: pause | s: screenshot | r: reseed")
 
     # Field is static (no temporal evolution), so we don't track time.
     paused = False
@@ -113,24 +114,6 @@ def main():
                         bin_idx = segment_idx % len(palette)
                     else:
                         bin_idx = min(len(palette) - 1, int(normalized * len(palette)))
-                    
-                    # if len(palette) == 5:
-                    #     segments = 15
-                    #     segment_idx = min(segments - 1, int(normalized * segments))
-                    #     bin_idx = segment_idx % len(palette)
-                    # elif len(palette) == 6:
-                    #     segments = [25, 20, 15, 15, 15, 10]  # total 100
-                    #     total_segments = sum(segments)
-                    #     segment_idx = min(total_segments - 1, int(normalized * total_segments))
-                    #     cumulative = 0
-                    #     bin_idx = len(palette) - 1
-                    #     for i, seg_count in enumerate(segments):
-                    #         cumulative += seg_count
-                    #         if segment_idx < cumulative:
-                    #             bin_idx = i
-                    #             break
-                    # else:
-                        # bin_idx = min(len(palette) - 1, int(normalized * len(palette)))
 
                     color = palette[bin_idx]
 
@@ -153,7 +136,9 @@ def main():
                     cv2.putText(canvas, txt, (x0 + 2, y0 + cell_size - 4), cv2.FONT_HERSHEY_SIMPLEX,
                                 0.35, text_color, 1, cv2.LINE_AA)
 
-        cv2.imshow("Perlin Rect Field", canvas)
+        display_frame = cv2.GaussianBlur(canvas, (5, 5), 0) if apply_blur else canvas
+
+        cv2.imshow("Perlin Rect Field", display_frame)
         key = cv2.waitKey(1) & 0xFF
 
         if key in (27, ord('q')):  # ESC / q
@@ -176,6 +161,9 @@ def main():
         elif key == ord('u'):
             use_segments = not use_segments
             print(f"Segment bands: {'ON' if use_segments else 'OFF'}")
+        elif key == ord('b'):
+            apply_blur = not apply_blur
+            print(f"Post blur: {'ON' if apply_blur else 'OFF'}")
         elif key == ord('+') or key == ord('='):
             base_scale *= 1.15
             print(f"Scale increased: {base_scale:.4f}")
@@ -197,7 +185,8 @@ def main():
             print(f"Paused: {paused}")
         elif key == ord('s'):
             fname = f"perlin_rect_{int(time.time())}.png"
-            cv2.imwrite(fname, canvas)
+            frame_to_save = cv2.GaussianBlur(canvas, (5, 5), 0) if apply_blur else canvas
+            cv2.imwrite(fname, frame_to_save)
             print(f"Saved {fname}")
         elif key == ord('r'):  # regenerate / change seed
             seed = random.randint(0, 10_000_000)
