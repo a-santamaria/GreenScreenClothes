@@ -23,6 +23,7 @@ matplotlib==3.9.4
 narwhals==2.7.0
 numpy==1.26.4
 opencv-python-headless==4.8.1.78
+noise==1.2.2
 packaging==25.0
 pandas==2.3.3
 pillow==11.3.0
