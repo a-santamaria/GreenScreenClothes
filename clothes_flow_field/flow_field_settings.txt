@@ -1,0 +1,14 @@
+{
+  "noise_scale": 0.0025286996814399745,
+  "time_speed": 1.6676717898249043,
+  "speed_factor": 0.1919237062993922,
+  "base_trail_thickness": 5.0,
+  "force_magnitude": 0.6604842479213825,
+  "curl_strength": 1.2999999999999994,
+  "trail_length_min": 41,
+  "trail_length_max": 225,
+  "trail_fade_power": 0.5999999999999979,
+  "num_particles": 70,
+  "show_vectors": false,
+  "show_controls": true
+}
