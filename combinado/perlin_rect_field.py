@@ -3,6 +3,7 @@ import numpy as np
 import time
 import random
 import math
+import os
 
 try:
     import noise as noise_lib  # pip package 'noise'
@@ -50,12 +51,17 @@ def main():
     use_points = False
     use_segments = True
     apply_blur = False
+    record_video = False
+    video_writer = None
+    video_filename = None
+    video_fps = 30.0
+    video_dir = os.path.join(os.path.dirname(__file__), "videos")
 
     cv2.namedWindow("Perlin Rect Field", cv2.WINDOW_NORMAL)
     cv2.resizeWindow("Perlin Rect Field", width, height)
 
     print("Perlin Rectangle Field")
-    print("ESC/q: quit | v: toggle numeric values | c: cycle color modes | x: toggle points | u: toggle segment bands | b: toggle blur | +/-: change scale | h/l: adjust time scale | p: pause | s: screenshot | r: reseed")
+    print("ESC/q: quit | v: toggle numeric values | c: cycle color modes | x: toggle points | u: toggle segment bands | b: toggle blur | +/-: change scale | h/l: adjust time scale | p: pause | s: screenshot | r: reseed | w: toggle video record")
 
     # Field is static (no temporal evolution), so we don't track time.
     paused = False
@@ -138,7 +144,11 @@ def main():
 
         display_frame = cv2.GaussianBlur(canvas, (5, 5), 0) if apply_blur else canvas
 
-        cv2.imshow("Perlin Rect Field", display_frame)
+        if record_video and video_writer is not None:
+            video_writer.write(display_frame)
+        else:
+            cv2.imshow("Perlin Rect Field", display_frame)
+
         key = cv2.waitKey(1) & 0xFF
 
         if key in (27, ord('q')):  # ESC / q
@@ -191,8 +201,31 @@ def main():
         elif key == ord('r'):  # regenerate / change seed
             seed = random.randint(0, 10_000_000)
             print(f"Noise reseeded base={seed}")
+        elif key == ord('w'):
+            if record_video:
+                record_video = False
+                if video_writer is not None:
+                    video_writer.release()
+                    print(f"Stopped recording {video_filename}")
+                video_writer = None
+                video_filename = None
+            else:
+                os.makedirs(video_dir, exist_ok=True)
+                video_filename = os.path.join(video_dir, f"perlin_rect_{int(time.time())}.mp4")
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                video_writer = cv2.VideoWriter(video_filename, fourcc, video_fps, (width, height))
+                if not video_writer.isOpened():
+                    print("Failed to start video recording.")
+                    video_writer = None
+                    video_filename = None
+                else:
+                    record_video = True
+                    print(f"Recording video to {video_filename} (window updates paused)")
 
         frame_count += 1
+
+    if video_writer is not None:
+        video_writer.release()
 
     cv2.destroyAllWindows()
 
