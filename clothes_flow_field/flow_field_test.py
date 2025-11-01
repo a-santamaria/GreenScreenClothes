@@ -177,7 +177,7 @@ class FlowField:
         self.trail_length_min = max(1, _int_setting(settings, "trail_length_min", 10))
         self.trail_length_max = _int_setting(settings, "trail_length_max", 80)
         self.trail_length_max = max(self.trail_length_min, min(self.trail_length_max, 400))
-        self.trail_fade_power = _clamp(_float_setting(settings, "trail_fade_power", 1.5), 0.1, 5.0)
+        self.trail_fade_power = _clamp(_float_setting(settings, "trail_fade_power", 1.5), 0.1, 10.0)
         
         # Particles that follow the flow field
         requested_particles = _int_setting(settings, "num_particles", 120)
@@ -391,7 +391,7 @@ class FlowField:
         self._enforce_trail_length_limits()
 
     def adjust_trail_fade_power(self, delta):
-        self.trail_fade_power = _clamp(self.trail_fade_power + delta, 0.1, 5.0)
+        self.trail_fade_power = _clamp(self.trail_fade_power + delta, 0.1, 10.0)
 
     def adjust_particle_count(self, delta):
         new_target = max(MIN_PARTICLES, min(self.num_particles + delta, MAX_PARTICLES))
