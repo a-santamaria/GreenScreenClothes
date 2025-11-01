@@ -16,3 +16,5 @@ venv.bak/
 
 # Project assets
 videos/
+snapshots/
+video_output/
