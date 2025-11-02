@@ -111,6 +111,80 @@ class VideoLooper:
         self._release()
 
 
+class OpticalFlowTracker:
+    """Maintains a garment mask by tracking feature points with Lucas-Kanade flow."""
+
+    def __init__(self, max_corners=400, quality_level=0.01, min_distance=7, min_points=20):
+        self.feature_params = dict(maxCorners=max_corners, qualityLevel=quality_level, minDistance=min_distance, blockSize=7)
+        self.lk_params = dict(winSize=(21, 21), maxLevel=3, criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.01))
+        self.min_points = min_points
+        self.prev_gray = None
+        self.prev_points = None
+        self.last_mask = None
+        self.active = False
+
+    def reset(self):
+        self.prev_gray = None
+        self.prev_points = None
+        self.last_mask = None
+        self.active = False
+
+    def initialize(self, frame_gray, hsv_mask):
+        points = cv2.goodFeaturesToTrack(frame_gray, mask=hsv_mask, **self.feature_params)
+        if points is None or len(points) < self.min_points:
+            print("Tracking initialization failed: insufficient features in mask.")
+            self.reset()
+            return False
+        self.prev_gray = frame_gray.copy()
+        self.prev_points = points
+        self.last_mask = self.build_mask_from_points(points.reshape(-1, 2), frame_gray.shape)
+        self.active = True
+        print(f"Tracking initialized with {len(points)} points.")
+        return True
+
+    def update(self, frame_gray, hsv_mask=None):
+        if not self.active or self.prev_gray is None or self.prev_points is None:
+            return None
+        next_points, status, _ = cv2.calcOpticalFlowPyrLK(self.prev_gray, frame_gray, self.prev_points, None, **self.lk_params)
+        if next_points is None:
+            print("Tracking update failed: optical flow returned no points.")
+            self.reset()
+            return None
+        status = status.reshape(-1)
+        good_new = next_points[status == 1]
+        if good_new.size < self.min_points * 2:
+            print("Tracking lost: not enough valid points.")
+            self.reset()
+            return None
+        self.prev_gray = frame_gray.copy()
+        self.prev_points = good_new.reshape(-1, 1, 2)
+        tracked_mask = self.build_mask_from_points(good_new, frame_gray.shape)
+        self.last_mask = tracked_mask
+        if hsv_mask is not None:
+            tracked_mask = self.refine_with_hsv(tracked_mask, hsv_mask)
+        return tracked_mask
+
+    def build_mask_from_points(self, points, frame_shape):
+        mask = np.zeros(frame_shape[:2], dtype=np.uint8)
+        if points is None or len(points) < 3:
+            return mask
+        hull = cv2.convexHull(points.astype(np.float32))
+        cv2.fillConvexPoly(mask, hull.astype(np.int32), 255)
+        return mask
+
+    def refine_with_hsv(self, tracked_mask, hsv_mask):
+        if hsv_mask is None:
+            return tracked_mask
+        overlap = cv2.bitwise_and(tracked_mask, hsv_mask)
+        if np.count_nonzero(overlap) > 0:
+            return overlap
+        return cv2.bitwise_or(tracked_mask, hsv_mask)
+
+    @property
+    def point_count(self):
+        return 0 if self.prev_points is None else len(self.prev_points)
+
+
 def load_settings(settings_path):
     if not os.path.exists(settings_path):
         return {}
@@ -157,19 +231,23 @@ def handle_hsv_command(cmd, lower_hue, upper_hue, step):
     return lower_hue, upper_hue, updated
 
 
-def build_overlay_lines(looper, lower_hue, upper_hue, show_original, apply_morph, apply_smooth, apply_components, recording, fill_green):
+def build_overlay_lines(looper, lower_hue, upper_hue, show_original, apply_morph, apply_smooth, apply_components, recording, tracking_enabled, tracker_active, tracker_points, hsv_refine, fill_green):
     current = looper.current() if looper else "None"
     total = len(looper.available()) if looper else 0
     position = ((looper.index % total) + 1) if looper and total else 0
     count_label = f"{position}/{total}" if total else "0/0"
+    tracking_label = "ACTIVE" if tracker_active else ("ARMED" if tracking_enabled else "OFF")
     lines = [
         f"Hue: {lower_hue}-{upper_hue} (h/j/k/l)",
         f"Overlay: {'ON' if show_original else 'OFF'} (o)",
         f"Morph: {'ON' if apply_morph else 'OFF'} (m)",
         f"Smooth: {'ON' if apply_smooth else 'OFF'} (g)",
         f"Components: {'ON' if apply_components else 'OFF'} (c)",
-    f"Recording: {'ON' if recording else 'OFF'} (v)",
+    f"Tracking: {tracking_label} (t)",
+    f"HSV refine: {'ON' if hsv_refine else 'OFF'} (f)",
+    f"Tracked pts: {tracker_points}",
     f"Fill green: {'ON' if fill_green else 'OFF'} (b)",
+        f"Recording: {'ON' if recording else 'OFF'} (v)",
         f"Video: {current if current else 'None'} ({count_label})",
         "p: save settings",
         "n: next video | r: reload list",
@@ -191,7 +269,6 @@ def draw_overlay(frame, lines):
     padding_y = 12
     line_gap = 6
 
-    # Compute panel bounds based on text sizes for consistent layout.
     text_sizes = [cv2.getTextSize(line, font, font_scale, thickness)[0] for line in lines]
     text_height = max(size[1] for size in text_sizes) if text_sizes else 0
     panel_width = max(size[0] for size in text_sizes) + padding_x * 2
@@ -212,7 +289,6 @@ def draw_overlay(frame, lines):
     return output
 
 
-# HSV thresholds for mask
 lower_hue = 30
 upper_hue = 90
 lower_sat = 50
@@ -246,7 +322,10 @@ apply_component_filter = False
 min_component_area = 800
 recording_output = None
 recording_writer = None
+use_tracking = False
+use_hsv_refine = True
 fill_green = False
+tracker = OpticalFlowTracker()
 
 loaded_settings = load_settings(SETTINGS_PATH)
 if loaded_settings:
@@ -263,6 +342,7 @@ if loaded_settings:
     apply_component_filter = bool(loaded_settings.get("apply_component_filter", apply_component_filter))
     min_component_area = int(loaded_settings.get("min_component_area", min_component_area))
     hue_step = int(loaded_settings.get("hue_step", hue_step))
+    use_hsv_refine = bool(loaded_settings.get("use_hsv_refine", use_hsv_refine))
     fill_green = bool(loaded_settings.get("fill_green", fill_green))
     print(f"Loaded settings from {SETTINGS_PATH}")
 
@@ -273,6 +353,7 @@ try:
         if not ret:
             continue
 
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         h, w = frame.shape[:2]
         if video_looper is None:
             video_looper = VideoLooper(video_dir=os.path.join(os.path.dirname(__file__), 'videos'), frame_size=(w, h))
@@ -286,19 +367,33 @@ try:
             hsv = cv2.GaussianBlur(hsv, smooth_kernel, 0)
         lower_bounds = np.array([lower_hue, lower_sat, lower_val], dtype=np.uint8)
         upper_bounds = np.array([upper_hue, upper_sat, upper_val], dtype=np.uint8)
-        mask = cv2.inRange(hsv, lower_bounds, upper_bounds)
+        hsv_mask = cv2.inRange(hsv, lower_bounds, upper_bounds)
 
         if apply_morphology:
-            mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, morph_kernel, iterations=1)
-            mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, morph_kernel, iterations=1)
+            hsv_mask = cv2.morphologyEx(hsv_mask, cv2.MORPH_OPEN, morph_kernel, iterations=1)
+            hsv_mask = cv2.morphologyEx(hsv_mask, cv2.MORPH_CLOSE, morph_kernel, iterations=1)
 
         if apply_component_filter:
-            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
-            filtered = np.zeros_like(mask)
+            num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(hsv_mask, connectivity=8)
+            filtered = np.zeros_like(hsv_mask)
             for label in range(1, num_labels):
                 if stats[label, cv2.CC_STAT_AREA] >= min_component_area:
                     filtered[labels == label] = 255
-            mask = filtered
+            hsv_mask = filtered
+
+        tracked_mask = None
+        if use_tracking:
+            if tracker.active:
+                tracked_mask = tracker.update(gray, hsv_mask if use_hsv_refine else None)
+                if tracked_mask is None:
+                    print("Tracking disabled: lost target.")
+                    use_tracking = False
+            else:
+                success = tracker.initialize(gray, hsv_mask)
+                if not success:
+                    use_tracking = False
+
+        final_mask = tracked_mask if tracked_mask is not None else hsv_mask
 
         vid_frame = video_looper.next_frame() if video_looper else None
         if vid_frame is None:
@@ -309,9 +404,9 @@ try:
         else:
             result = np.zeros_like(frame)
         if fill_green:
-            result[mask > 0] = FILL_COLOR
+            result[final_mask > 0] = FILL_COLOR
         else:
-            result[mask > 0] = vid_frame[mask > 0]
+            result[final_mask > 0] = vid_frame[final_mask > 0]
 
         overlay_lines = build_overlay_lines(
             video_looper,
@@ -322,6 +417,10 @@ try:
             apply_smoothing,
             apply_component_filter,
             recording_writer is not None,
+            use_tracking,
+            tracker.active,
+            tracker.point_count,
+            use_hsv_refine,
             fill_green,
         ) if show_instructions else []
         result = draw_overlay(result, overlay_lines)
@@ -331,7 +430,7 @@ try:
 
         cv2.imshow('Result', result)
         key = cv2.waitKey(1) & 0xFF
-        if key in (27, ord('q')):  # ESC or q
+        if key in (27, ord('q')):
             print("Quitting (key press).")
             break
         elif key == ord('h'):
@@ -342,6 +441,19 @@ try:
             lower_hue, upper_hue, _ = handle_hsv_command('k', lower_hue, upper_hue, hue_step)
         elif key == ord('l'):
             lower_hue, upper_hue, _ = handle_hsv_command('l', lower_hue, upper_hue, hue_step)
+        elif key == ord('t'):
+            if use_tracking:
+                print("Tracking deactivated by user.")
+                use_tracking = False
+                tracker.reset()
+            else:
+                if tracker.initialize(gray, hsv_mask):
+                    use_tracking = True
+                else:
+                    print("Press t again after adjusting the mask to initialize tracking.")
+        elif key == ord('f'):
+            use_hsv_refine = not use_hsv_refine
+            print(f"HSV refinement {'enabled' if use_hsv_refine else 'disabled'}.")
         elif key == ord('b'):
             fill_green = not fill_green
             print(f"Green fill {'enabled' if fill_green else 'disabled'}.")
@@ -360,11 +472,13 @@ try:
                 "apply_component_filter": bool(apply_component_filter),
                 "min_component_area": int(min_component_area),
                 "hue_step": int(hue_step),
+                "use_hsv_refine": bool(use_hsv_refine),
                 "fill_green": bool(fill_green),
             }
             save_settings(SETTINGS_PATH, current_settings)
         elif key == ord('n'):
-            if video_looper: video_looper.next_video()
+            if video_looper:
+                video_looper.next_video()
         elif key == ord('o'):
             show_original_video = not show_original_video
         elif key == ord('m'):
@@ -392,7 +506,8 @@ try:
                 recording_writer = None
                 recording_output = None
         elif key == ord('r'):
-            if video_looper: video_looper.reload()
+            if video_looper:
+                video_looper.reload()
         elif key == ord('s'):
             snapshot_name = f"projection_snapshot_{int(time.time())}.png"
             snapshot_path = os.path.join(SNAPSHOT_DIR, snapshot_name)
@@ -406,5 +521,7 @@ finally:
     cv2.destroyAllWindows()
     if recording_writer is not None:
         recording_writer.release()
-    if video_looper: video_looper.cleanup()
+    if video_looper:
+        video_looper.cleanup()
+    tracker.reset()
     print("Cleaned up. Bye.")
