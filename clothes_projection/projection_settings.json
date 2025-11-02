@@ -1,0 +1,15 @@
+{
+  "lower_hue": 30,
+  "upper_hue": 82,
+  "lower_sat": 50,
+  "upper_sat": 255,
+  "lower_val": 60,
+  "upper_val": 255,
+  "show_original_video": true,
+  "show_instructions": true,
+  "apply_morphology": false,
+  "apply_smoothing": false,
+  "apply_component_filter": false,
+  "min_component_area": 800,
+  "hue_step": 2
+}

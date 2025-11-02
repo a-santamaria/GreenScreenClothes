@@ -4,6 +4,7 @@ import sys
 import time
 import os
 import glob
+import json
 
 
 class VideoLooper:
@@ -104,6 +105,29 @@ class VideoLooper:
         self._release()
 
 
+def load_settings(settings_path):
+    if not os.path.exists(settings_path):
+        return {}
+    try:
+        with open(settings_path, "r", encoding="utf-8") as infile:
+            data = json.load(infile)
+            if isinstance(data, dict):
+                return data
+            print(f"Settings file {settings_path} did not contain a JSON object. Using defaults.")
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"Failed to load settings from {settings_path}: {exc}")
+    return {}
+
+
+def save_settings(settings_path, values):
+    try:
+        with open(settings_path, "w", encoding="utf-8") as outfile:
+            json.dump(values, outfile, indent=2)
+        print(f"Saved settings to {settings_path}")
+    except OSError as exc:
+        print(f"Failed to save settings to {settings_path}: {exc}")
+
+
 def handle_hsv_command(cmd, lower_hue, upper_hue, step):
     updated = False
     if cmd == 'h':
@@ -140,6 +164,7 @@ def build_overlay_lines(looper, lower_hue, upper_hue, show_original, apply_morph
         f"Components: {'ON' if apply_components else 'OFF'} (c)",
         f"Recording: {'ON' if recording else 'OFF'} (v)",
         f"Video: {current if current else 'None'} ({count_label})",
+        "p: save settings",
         "n: next video | r: reload list",
         "s: snapshot | ?: toggle controls",
         "q or ESC: quit",
@@ -192,6 +217,7 @@ hue_step = 2
 BASE_DIR = os.path.dirname(__file__)
 SNAPSHOT_DIR = os.path.join(BASE_DIR, "snapshots")
 VIDEO_OUT_DIR = os.path.join(BASE_DIR, "video_output")
+SETTINGS_PATH = os.path.join(BASE_DIR, "projection_settings.json")
 
 os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 os.makedirs(VIDEO_OUT_DIR, exist_ok=True)
@@ -212,6 +238,23 @@ apply_component_filter = False
 min_component_area = 800
 recording_output = None
 recording_writer = None
+
+loaded_settings = load_settings(SETTINGS_PATH)
+if loaded_settings:
+    lower_hue = int(loaded_settings.get("lower_hue", lower_hue))
+    upper_hue = int(loaded_settings.get("upper_hue", upper_hue))
+    lower_sat = int(loaded_settings.get("lower_sat", lower_sat))
+    upper_sat = int(loaded_settings.get("upper_sat", upper_sat))
+    lower_val = int(loaded_settings.get("lower_val", lower_val))
+    upper_val = int(loaded_settings.get("upper_val", upper_val))
+    show_original_video = bool(loaded_settings.get("show_original_video", show_original_video))
+    show_instructions = bool(loaded_settings.get("show_instructions", show_instructions))
+    apply_morphology = bool(loaded_settings.get("apply_morphology", apply_morphology))
+    apply_smoothing = bool(loaded_settings.get("apply_smoothing", apply_smoothing))
+    apply_component_filter = bool(loaded_settings.get("apply_component_filter", apply_component_filter))
+    min_component_area = int(loaded_settings.get("min_component_area", min_component_area))
+    hue_step = int(loaded_settings.get("hue_step", hue_step))
+    print(f"Loaded settings from {SETTINGS_PATH}")
 
 try:
     running = True
@@ -285,6 +328,23 @@ try:
             lower_hue, upper_hue, _ = handle_hsv_command('k', lower_hue, upper_hue, hue_step)
         elif key == ord('l'):
             lower_hue, upper_hue, _ = handle_hsv_command('l', lower_hue, upper_hue, hue_step)
+        elif key == ord('p'):
+            current_settings = {
+                "lower_hue": int(lower_hue),
+                "upper_hue": int(upper_hue),
+                "lower_sat": int(lower_sat),
+                "upper_sat": int(upper_sat),
+                "lower_val": int(lower_val),
+                "upper_val": int(upper_val),
+                "show_original_video": bool(show_original_video),
+                "show_instructions": bool(show_instructions),
+                "apply_morphology": bool(apply_morphology),
+                "apply_smoothing": bool(apply_smoothing),
+                "apply_component_filter": bool(apply_component_filter),
+                "min_component_area": int(min_component_area),
+                "hue_step": int(hue_step),
+            }
+            save_settings(SETTINGS_PATH, current_settings)
         elif key == ord('n'):
             if video_looper: video_looper.next_video()
         elif key == ord('o'):
